@@ -447,7 +447,7 @@ function drawLib(){
 const setBy=b=>{BY=b;draw()},setSt=id=>{STR=id||'';draw()};
 async function chkJobs(){const j=arr(await api('/api/jobs')),r=j.find(x=>x.kind=='newrun'&&x.status=='running'&&!x.dry);const was=RUNJOB;RUNJOB=r?r.id:null;
  if(VIEW!='lib')return;const b=E('ban');if(b)b.innerHTML=r?`<div class=stat role=status><span class=spin></span><b>A run is making Reels now</b><small>${esc(r.label||'')}</small><button class=sm data-go=new>Show progress</button></div>`:'';
- clearTimeout(POLL);if(r)POLL=setTimeout(chkJobs,5000);else if(was){await loadRun();draw();toast('New Reels are ready')}}
+ clearTimeout(POLL);if(r){const n0=D.shorts.length;await loadRun();if(D.shorts.length>n0){toast('A new Reel is ready');return draw()}POLL=setTimeout(chkJobs,5000)}else if(was){await loadRun();draw();toast('New Reels are ready')}}
 async function copyDay(d){const l=D.shorts.filter(s=>s.day==d),t=l.map(s=>`${s.file}\n${s.title}\n${s.hashtags}\n${s.credit}`+(s.schedule?`\nSchedule: ${s.schedule.local}`:'')).join('\n\n');
  try{await navigator.clipboard.writeText(t)}catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove()}toast(`Copied post text for ${l.length} Reels`)}
 function focusCard(){const c=document.querySelector(`.card[data-i="${SEL}"]`);document.querySelectorAll('.card').forEach(x=>x.classList.toggle('sel',x==c))}
@@ -646,10 +646,11 @@ function drawNew(){E('main').innerHTML=`<div class=two><div class=form><label>Wh
  const go=async dry=>{if(!dry&&!await ask('Start the AI now? It runs with full permissions in the run folder.',{ok:'Start run'}))return;E('n_err').textContent='';const L=E('n_log');L.hidden=false;L.textContent='...';
   const r=await api('/api/newrun',{source:E('n_src').value,count:E('n_cnt').value,window:E('n_win').value,ai:E('n_ai').value,dry});if(r.error){L.hidden=true;E('n_err').textContent=r.error;return}
   if(dry)return follow(r.job,L,null,'Preview: nothing was started\n');runUI(r.job,Date.now())};E('n_dry').onclick=()=>go(true);E('n_go').onclick=()=>go(false);
- refAI();api('/api/ai').then(r=>{if(r.current){AICUR=r.current;refAI()}});api('/api/jobs').then(j=>{j=arr(j);if(E('jobs'))E('jobs').innerHTML=j.map(x=>`${x.status} · ${x.kind} ${esc(x.label)}${x.dry?' (dry)':''}`).join('<br>')||'none yet';const r=j.find(x=>x.kind=='newrun'&&x.status=='running'&&!x.dry);if(r&&E('n_go'))runUI(r.id,NR&&NR.job==r.id?NR.t0:Date.now())})}
+ refAI();api('/api/ai').then(r=>{if(r.current){AICUR=r.current;refAI()}});api('/api/jobs').then(j=>{j=arr(j);if(E('jobs'))E('jobs').innerHTML=j.map(x=>`${x.status} · ${x.kind} ${esc(x.label)}${x.dry?' (dry)':''}`).join('<br>')||'none yet';const r=j.find(x=>x.kind=='newrun'&&x.status=='running'&&!x.dry);if(r&&E('n_go'))runUI(r.id,NR&&NR.job==r.id?NR.t0:(r.t?r.t*1000:Date.now()))})}
 function runUI(job,t0){NR={job,t0};E('n_go').disabled=true;E('n_stat').hidden=false;E('n_done').innerHTML='';const L=E('n_log');L.hidden=false;const B=D.shorts.length,tk=()=>{if(E('n_t'))E('n_t').textContent=t('c.running',{t:mmss(Date.now()-t0)})};tk();
- const pr=async()=>{const p=await api('/api/progress?id='+job);paintProg(p)};pr();
- const tm=setInterval(()=>{if(!E('n_t')||!NR||NR.job!=job)return clearInterval(tm);tk();if(Date.now()%3000<1000)pr()},1000);
+ let busy=false,seen=null;  // seen = Reels already counted: a rise means a new Reel just finished, so Today/Reels show it now, not when the whole run ends
+ const pr=async()=>{if(busy)return;busy=true;try{const p=await api('/api/progress?id='+job);paintProg(p);if(p&&typeof p.made=='number'){if(seen!==null&&p.made>seen){await loadRun();toast('Reel '+p.made+' is ready: it is in Today and Reels')}seen=p.made}}finally{busy=false}};pr();
+ let ticks=0;const tm=setInterval(()=>{if(!E('n_t')||!NR||NR.job!=job)return clearInterval(tm);tk();if(++ticks%2==0)pr()},1000);
  follow(job,L,async j=>{NR=null;clearInterval(tm);await api('/api/progress?id='+job).then(paintProg);const rr=await api('/api/runs');RUNS=arr(rr.runs);await loadRun();if(!E('n_stat'))return;E('n_stat').hidden=true;E('n_go').disabled=false;
   E('n_done').innerHTML=j.status=='failed'?`<div class="note bad">${te('c.failed')}</div>`:`<div class="note" style="margin-top:12px"><b>${te('c.ready',{n:D.shorts.length-B})}</b></div><div class=row style="margin-top:10px"><button class=p data-go=lib>${te('c.open')}</button></div>`})}
 function paintProg(p){const B=E('n_prog');if(!B||!p||p.error)return;
@@ -1212,7 +1213,7 @@ function drawNew(){const m=E('main');E('sub').textContent=t('c.sub');
   const r=await api('/api/newrun',{source:src,count:E('n_cnt').value,window:E('n_win').value,ai:E('n_ai').value,dry:false});if(r.error){L.hidden=true;E('n_err').textContent=r.error;return}runUI(r.job,Date.now())};
  E('n_go').onclick=start;
  refAI();api('/api/ai').then(r=>{if(r.current){AICUR=r.current;refAI()}});
- api('/api/jobs').then(j=>{const r=arr(j).find(x=>x.kind=='newrun'&&x.status=='running'&&!x.dry);if(r&&E('n_go'))runUI(r.id,NR&&NR.job==r.id?NR.t0:Date.now())});
+ api('/api/jobs').then(j=>{const r=arr(j).find(x=>x.kind=='newrun'&&x.status=='running'&&!x.dry);if(r&&E('n_go'))runUI(r.id,NR&&NR.job==r.id?NR.t0:(r.t?r.t*1000:Date.now()))});
  pickInto(E('mk_pick'));
  if(CREQ){E('n_src').value=CREQ.src;E('n_src').oninput();E('n_cnt').value=CREQ.cnt;CREQ=null;start()}}
 function paintProg(p){const B=E('n_prog');if(!B||!p||p.error)return;const fin=p.pct>=100;

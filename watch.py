@@ -4,7 +4,7 @@
 #        channels.txt line 'twitch: Grand Theft Auto VI' does the same inside the normal run (3 VODs per line).
 # Usage: python watch.py [TITLE_REGEX='GTA ?(6|VI)'] [MAX_NEW=3]      (run it on a schedule, or let the skill run it)
 #        python watch.py <link or file>   one video from any site yt-dlp knows (YouTube, Twitch VODs, Kick) or a local file
-import json, os, re, subprocess, sys, threading, urllib.parse, urllib.request
+import json, os, re, subprocess, sys, threading, time, urllib.parse, urllib.request
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)  # titles carry emoji (Windows console is cp1252); each line shows at once, also in a log file
 from pathlib import Path
 from live import category_streams, recent_vods, vod_window, top_channel
@@ -114,8 +114,8 @@ for v in rss + found:  # named channels first (newest), then search hits (most v
         new.append(v); ids.add(v["id"])
 new += [v for v in tw if v["id"] not in seen]
 if link:  # one pasted link or file: ask yt-dlp for its id and title (works for Twitch/Kick too)
-    j = {} if Path(link).is_file() else json.loads(run_t([PY, "-m", "yt_dlp", *CK, "-J", "--no-warnings", link], T_META, "video info", capture_output=True, text=True, encoding="utf-8").stdout or "{}")
-    new = [dict(id=re.sub(r"\W", "_", j.get("id") or Path(link).stem), title=j.get("title") or Path(link).stem, date=(j.get("upload_date") or "")[:8],
+    j = {} if Path(link).is_file() else json.loads(run_t([PY, "-m", "yt_dlp", *CK, "-J", "--no-warnings", link], T_META, "video info", capture_output=True, text=True, encoding="utf-8").stdout or "{}") or {}  # "null" from a failed lookup must not crash the run
+    new =[dict(id=re.sub(r"\W", "_", j.get("id") or Path(link).stem), title=j.get("title") or Path(link).stem, date=(j.get("upload_date") or "")[:8],
                 channel=j.get("uploader") or j.get("channel") or "", views=j.get("view_count") or 0, url=link)]; max_new = 1
     win = sys.argv[2] if len(sys.argv) > 2 else ("0-3:00:00" if (j.get("duration") or 0) > 4 * 3600 else None)  # a 40-hour VOD would take an hour to fetch
     if win: new[0]["id"] += "_" + re.sub(r"\W", "", win); print("  window", win, "of", f"{(j.get('duration') or 0) / 3600:.1f} h")
@@ -128,7 +128,24 @@ for v in new:
     a = Path(url) if Path(url).is_file() else SRC / f"{v['id']}.m4a"  # a local file is transcribed as it is: nothing to download
     print("new:", v["date"] or f"{v['views']:,} {'viewers' if v.get('twitch') else 'views'}", v["channel"], "|", v["title"])
     # audio only: small and fast; the video is fetched later, only for the moments Claude picks (clip.py with the URL)
-    r = subprocess.CompletedProcess([], 0) if a.exists() else run_t([PY, "-m", "yt_dlp", *CK, "-q", "-f", "ba[ext=m4a]/audio_only/ba", "--match-filter", "duration>8" if link else "duration>180 & duration<=7200", *(["--download-sections", "*" + (v.get("win") or win)] if v.get("win") or win else []), "-o", str(a), url], T_AUDIO, "audio download " + v["id"], capture_output=True, text=True, encoding="utf-8", errors="replace")  # resume: audio already fetched
+    dlog = SRC / f"{v['id']}.dl"; dprog = SRC / f"{v['id']}.dlprogress"; stop = threading.Event()
+    w = v.get("win") or win; wsecs = (sec(w.split("-")[1]) - sec(w.split("-")[0])) if w else 0  # a time window is fetched by ffmpeg, which prints no yt-dlp progress
+    def dl_watch():  # yt-dlp prints "downloaded total estimate" into dlog; turn the last line into the percentage the app shows
+        while not stop.wait(2):
+            got = tot = 0
+            try:
+                p = dlog.read_text(encoding="utf-8", errors="replace").split("\n")[-2].split(); got, tot = float(p[0]), next((float(x) for x in p[1:3] if x.replace(".", "").isdigit() and float(x) > 0), 0)
+            except (OSError, IndexError, ValueError): pass  # no line yet, or the audio has no known size
+            if not tot and wsecs:  # window download: the growing .part file against the window length (YouTube audio is about 16 KB per second)
+                try: tot = wsecs * 16500; got = min(a.with_name(a.name + ".part").stat().st_size, tot * .95)
+                except OSError: tot = 0
+            if tot:
+                try: dprog.write_text(json.dumps(dict(done=got, total=tot, t=time.time())), encoding="utf-8")
+                except OSError: pass
+    if not a.exists(): threading.Thread(target=dl_watch, daemon=True).start()
+    with open(dlog, "w", encoding="utf-8") as dl_out:
+        r = subprocess.CompletedProcess([], 0) if a.exists() else run_t([PY, "-m", "yt_dlp", *CK, "-q", "--progress", "--newline", "--progress-delta", "2", "--progress-template", "download:%(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s", "-N", "4", "-f", "ba[ext=m4a]/audio_only/ba", "--match-filter", "duration>8" if link else "duration>180 & duration<=7200", *(["--download-sections", "*" + (v.get("win") or win)] if v.get("win") or win else []), "-o", str(a), url], T_AUDIO, "audio download " + v["id"], stdout=dl_out, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")  # resume: audio already fetched
+    stop.set(); dlog.unlink(missing_ok=True); dprog.unlink(missing_ok=True)
     if r.returncode and "confirm your age" in (r.stderr or ""):
         print("  skipped: age-restricted (needs a login)"); seen.add(v["id"]); SEEN.write_text(json.dumps(sorted(seen))); continue
     if r.returncode and re.search(r"live event will begin|Premieres in|is_upcoming", r.stderr or ""):
@@ -149,7 +166,9 @@ for v in new:
             except Exception as e: print("  clips skipped:", str(e)[:100])
         if live: th = threading.Thread(target=sig, daemon=True); th.start()
         env = os.environ | {"TRANSCRIBE_OFFSET": str(sec((v.get("win") or win).split("-")[0])) if v.get("win") or win else "0"}  # transcript times = times in the full VOD
-        if subprocess.run([PY, str(HERE / "transcribe.py"), str(a), str(SRC / f"{v['id']}.json")], env=env).returncode:
+        have = (SRC / f"{v['id']}.json").exists() and (SRC / f"{v['id']}.txt").exists()  # same video transcribed before: reuse it, no second Whisper run
+        if have: print("  transcript already exists, reusing it", flush=True)
+        if not have and subprocess.run([PY, str(HERE / "transcribe.py"), str(a), str(SRC / f"{v['id']}.json")], env=env).returncode:
             print("  transcript failed, will retry next run"); continue  # not marked seen
         if live: th.join()
         hm = []  # YouTube's "most replayed" graph: where real viewers rewatched

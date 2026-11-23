@@ -14,14 +14,42 @@ Keep the black window open while you use Clipora. Close it to stop the app. Next
 
 **Mac or Linux:** open a terminal in the folder and run `bash start.sh`.
 
-**With Claude Code (or another AI coding tool):** copy this page's link and say:
-> Install Clipora from `<this GitHub link>` and start it.
+### Install with Claude Code (or another AI coding tool)
 
-The tool downloads it and runs `Start.bat` (Windows) or `start.sh` (Mac/Linux).
+Open Claude Code, Claude, Codex or any AI coding tool that can run commands on your computer, and paste this one prompt:
+
+```
+Install Clipora from https://github.com/raghavthakur18/Clipora with all its dependencies and start it.
+Steps: download the repository into a new folder; make sure Python 3.9 to 3.12 and ffmpeg are installed (install them if missing);
+then run Start.bat on Windows or "bash start.sh" on Mac and Linux, and keep it running.
+When Clipora opens in the browser, tell me it is ready. If something fails, show me the error and fix it.
+```
+
+The tool installs everything and starts the app. To start it again later, paste: `Start Clipora from the folder you installed it in.`
+
+**Use a paid model if you can.** A paid plan (for example Claude Pro or higher) gives a larger context window, so the AI can read a whole long transcript and pick better moments. Free models have a smaller context window: on long videos they can miss parts of the transcript or stop early. If you only have a free model, use **Only this part** to clip short sections, or switch to **No AI** mode in **Settings**.
+
+## What it looks like
+
+**1. Paste a link, choose how many reels, and press Create Reels.** For a first try, use a short video or **Only this part** (here `0-4:00`).
+
+![Paste a link](docs/1-paste-link.jpg)
+
+**2. The bar starts at once and shows the real work:** here the download, with the megabytes received.
+
+![Downloading](docs/2-downloading.jpg)
+
+**3. Each step fills in as it finishes.** Here the reels are rendering.
+
+![Rendering](docs/3-rendering.jpg)
+
+**4. 100% appears only when the reels are really finished and saved.** Press **Review them** to watch them.
+
+![Done](docs/4-done.jpg)
 
 ## How to use it
 
-1. **Create:** paste a link (YouTube, Twitch, Kick, TikTok, X, Instagram, Google Drive and more), upload a video from your PC, or take the latest GTA 6 videos. Choose how many reels you want, then press **Create Reels**. A progress bar shows each step (Download, Transcribe, Pick moments, Render, Quality check) and roughly how long is left.
+1. **Create:** paste a link (YouTube, Twitch, Kick, TikTok, X, Instagram, Google Drive and more), upload a video from your PC, or take the latest GTA 6 videos. Choose how many reels you want, then press **Create Reels**. The progress bar starts the moment you press the button and shows each step (Download, Transcribe, Pick moments, Render, Quality check) with the real percentage of work done. It reaches 100% only when the reels are finished and saved. Each reel appears in **Today** and **Reels** as soon as it is done, while the next one is still rendering.
 2. **Reels:** watch each reel, then approve it or reject it. In **Look**, a live preview shows your caption style, size, position, watermark and shape (9:16, 4:5, 1:1) as you change them. You can also pick the caption language, or ask the AI to change something in plain words.
 3. **Schedule:** drag approved reels onto a calendar, or let Clipora spread them out. You then post them yourself.
 
@@ -36,12 +64,14 @@ Other screens:
 
 - Windows 10/11, macOS or Linux, and about 5 GB of free space.
 - An internet connection for the first setup and for downloading videos.
-- Optional: an NVIDIA graphics card. It makes the transcribe step much faster.
+- Optional: a graphics card. An NVIDIA card makes the transcribe step much faster. NVIDIA, Intel and AMD cards are also used to speed up the final render when ffmpeg can use them; otherwise Clipora renders on the CPU.
 - An AI tool picks the best moments. **Claude Code** gives the best results. Codex, Gemini CLI, OpenCode or Ollama also work, and **No AI** mode works with nothing installed. Change it in **Settings**.
 
 ## Good to know
 
-- A 2-hour video can take 30 to 60 minutes the first time, mostly for transcribing. Use **Only this part** (for example `1:10:00-1:40:00`) to make reels from a short section much faster.
+- **Shorter videos finish much faster.** The time depends on how long the video is, because Clipora downloads it, transcribes every minute of speech, then renders each reel. A 4-minute video gave 2 finished reels in under 5 minutes on a normal laptop. A 2-hour video can take 30 to 60 minutes the first time, mostly for transcribing. If you can, give Clipora a short video (about 5 minutes or less), or use **Only this part** (for example `1:10:00-1:40:00`) to cut reels from just one section of a long video.
+- You can reload the page or close the tab while a run is working. The run keeps going, and when you come back the progress bar and the timer show where it really is.
+- If a reel shows a black picture, the app was probably closed. Reels are played from the running app, so keep the black window (or terminal) open and reload the page.
 - Your reels, settings and keys stay on your computer, in the `workspace` folder. That folder is never uploaded to GitHub.
 - Only clip videos you have the rights to use, and credit the creator.
 

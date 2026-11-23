@@ -504,8 +504,10 @@ def adopt_runs():  # after a restart: runs still working get their job back, so 
     for mk in (WS / "runs").glob("*/.running") if (WS / "runs").is_dir() else []:
         try: m = json.loads(mk.read_text(encoding="utf-8"))
         except Exception: continue
-        if not pid_alive(m["pid"]): mk.unlink(missing_ok=True); continue
         jid = str(int(m.get("t", time.time()) * 1000)); folder = mk.parent
+        if not pid_alive(m["pid"]):  # stopped by hand: the reels already made count, the run shows as finished with those
+            if any((folder / "clips" / "out").glob("[0-9][0-9]_*.mp4")): JOBS[jid] = dict(id=jid, kind="newrun", label=m.get("label", ""), status="done", log=["(run was stopped; the reels already made are kept)"], t=m.get("t", time.time()), dry=False, folder=str(folder))
+            mk.unlink(missing_ok=True); continue
         JOBS[jid] = dict(id=jid, kind="newrun", label=m.get("label", ""), status="running", log=["(reconnected after the app restarted: the run kept working; its live log is not shown)"], t=m.get("t", time.time()), dry=False, folder=str(folder))
         def watch(jid=jid, pid=m["pid"], mk=mk, folder=folder):
             while pid_alive(pid): time.sleep(10)
@@ -552,8 +554,8 @@ def pctile(v, p):  # p-th percentile (0-100) of a sorted list, linear between ne
     k = (len(v) - 1) * p / 100; a = int(k); b = min(a + 1, len(v) - 1); return v[a] + (v[b] - v[a]) * (k - a)
 def span_txt(lo, hi):  # seconds -> "about 3 min" or "about 2-5 min"
     a, b = max(1, round(lo / 60)), max(1, round(hi / 60)); return f"about {a} min" if a == b else f"about {a}-{b} min"
-def render_secs(c):  # (seconds each finished clip took, exact?). Exact = clip.py's own took_s in the clip's render.json (download + render, no waiting). Older clips have none: fall back to the gap from when the clip could start (its picks file written, or the clip before it done) to its mp4, which also holds waiting time, so it is only rough
-    out = c / "out"
+def render_secs(c, out=None):  # (seconds each finished clip took, exact?). Exact = clip.py's own took_s in the clip's render.json (download + render, no waiting). Older clips have none: fall back to the gap from when the clip could start (its picks file written, or the clip before it done) to its mp4, which also holds waiting time, so it is only rough
+    out = out or c / "out"
     if not out.is_dir(): return [], True
     tk = []
     for p in out.glob("[0-9][0-9]_*.render.json"):
@@ -561,7 +563,7 @@ def render_secs(c):  # (seconds each finished clip took, exact?). Exact = clip.p
         except Exception: pass
     tk = [t for t in tk if t > 0]
     if len(tk) >= 2: return tk, True
-    picks = sorted(p.stat().st_mtime for p in c.glob("picks*.json")); done = sorted(p.stat().st_mtime for p in out.glob("[0-9][0-9]_*.mp4"))
+    picks = sorted(p.stat().st_mtime for p in [*c.glob("picks*.json"), *out.glob("picks*.json")]); done = sorted(p.stat().st_mtime for p in out.glob("[0-9][0-9]_*.mp4"))
     gaps, prev = [], 0.0
     for t in done:
         t0 = max([prev] + [x for x in picks if x <= t])
@@ -575,10 +577,12 @@ def render_eta(gaps, todo, since):  # (low, high, per-clip high) seconds for `to
 def run_progress(jid):  # read-only: which step a new run is on, judged by the files each step leaves behind
     j = JOBS.get(jid)
     if not j or not j.get("folder"): return dict(error="no such run")
-    c = Path(j["folder"]) / "clips"; src, out, now = c / "src", c / "out", time.time()
+    root = Path(j["folder"]); c = root / "clips"; src, now = c / "src", time.time()
+    out = c / "out"  # AI-tool runs keep Shorts + picks in clips\out; No-AI (chain) runs write picks.json, the Shorts and qc.json straight into the run folder
+    if not any(out.glob("[0-9][0-9]_*.mp4")) and (any(root.glob("[0-9][0-9]_*.mp4")) or any(root.glob("picks*.json"))): out = root
     audio = [p for p in src.glob("*") if p.suffix.lower() in (".m4a", ".mp3", ".opus", ".webm", ".wav", ".mp4", ".mkv")] if src.is_dir() else []
     trans = [p for p in src.glob("*.json") if not p.name.endswith(".meta.json") and p.name not in ("seen.json", "used.json", "moments.json")] if src.is_dir() else []
-    pks = sorted(c.glob("picks*.json"), key=lambda p: p.stat().st_mtime)  # the newest picks file is the batch being rendered now (re-picks and fixes write picks_b, picks_c ...)
+    pks = sorted([*c.glob("picks*.json"), *root.glob("picks*.json")], key=lambda p: p.stat().st_mtime)  # the newest picks file is the batch being rendered now (re-picks and fixes write picks_b, picks_c ...)
     try: picks = json.loads(pks[-1].read_text(encoding="utf-8")) if pks else []
     except Exception: picks = []
     clips = sorted(out.glob("[0-9][0-9]_*.mp4"), key=lambda p: p.stat().st_mtime) if out.is_dir() else []
@@ -588,6 +592,11 @@ def run_progress(jid):  # read-only: which step a new run is on, judged by the f
     qc = qp.exists() and bool(clips) and qp.stat().st_mtime >= max(x.stat().st_mtime for x in clips) - 1  # a qc.json older than the newest clip belongs to an earlier batch
     fr = [0.0] * 5; note = [""] * 5; left = ""
     if audio: fr[0] = 1
+    else:  # no finished audio yet: watch.py writes the real download share while yt-dlp runs
+        try:
+            dp = max(src.glob("*.dlprogress"), key=lambda p: p.stat().st_mtime); pg = json.loads(dp.read_text(encoding="utf-8"))
+            if now - pg["t"] < 120 and pg["total"] > 0: fr[0] = min(pg["done"] / pg["total"], .99); note[0] = f"{pg['done'] / 1e6:.0f} of {pg['total'] / 1e6:.0f} MB downloaded"
+        except (ValueError, OSError, KeyError): pass
     if audio:
         fr[1] = min(1, len(trans) / len(audio))
         if fr[1] < 1:
@@ -603,20 +612,28 @@ def run_progress(jid):  # read-only: which step a new run is on, judged by the f
                 left = f"rough guess: {span_txt(need - done, need - done)} left" if done < need else "taking longer than usual, still working"
                 note[1] = f"{round(secs / 60)} min of video"
     if fr[1] >= 1: fr[2] = .5
-    if n_pick: fr[2] = 1; fr[3] = (n_pick - len(todo)) / n_pick; note[3] = f"{made} made" + (f", {len(todo)} to go" if todo else "")
+    if n_pick:
+        fr[2] = 1; part = 0.0; cur = ""  # the Short being encoded right now: clip.py writes its seconds done / total next to it
+        try:
+            rp = max(out.glob("*.progress"), key=lambda p: p.stat().st_mtime); pg = json.loads(rp.read_text(encoding="utf-8"))
+            if now - pg["t"] < 120 and pg["total"] > 0 and not (out / (rp.stem + ".mp4")).exists(): part = min(pg["done"] / pg["total"], .99); cur = f", Short {made + 1} rendering {round(part * 100)}%"
+        except (ValueError, OSError, KeyError): pass
+        fr[3] = min((n_pick - len(todo) + part) / n_pick, .99 if todo else 1); note[3] = f"{made} made" + (f", {len(todo)} to go" if todo else "") + cur
     if todo:  # time left = clips still to render x what clips in this run really took; nothing is shown until 2 clips were timed
-        secs, exact = render_secs(c); last = max([x.stat().st_mtime for x in clips] + [pks[-1].stat().st_mtime]); since = 0 if exact else now - last; eta = render_eta(secs, len(todo), since)  # exact: the clip in progress may be part-done, so the range is a little long, never short
+        secs, exact = render_secs(c, out); last = max([x.stat().st_mtime for x in clips] + [pks[-1].stat().st_mtime]); since = 0 if exact else now - last; eta = render_eta(secs, len(todo), since)  # exact: the clip in progress may be part-done, so the range is a little long, never short
         left = "time left appears once 2 clips are made" if not eta else f"taking longer than usual ({round(since / 60)} min on this clip), still working" if since > 1.5 * eta[2] else ("" if exact else "rough guess: ") + span_txt(eta[0], eta[1]) + " left"
     try: q = [x for x in json.loads(qp.read_text(encoding="utf-8")) if (out / x["file"]).exists()]  # report only clips that still exist (a failed one may have been removed)
     except Exception: q = []
     if q: bad = [x for x in q if x["status"] == "FAIL"]; note[4] = f"{len(q) - len(bad)} passed" + (f", {len(bad)} failed: " + "; ".join(f"{x['file']} ({', '.join(x['fail'])})" for x in bad) if bad else "")
-    if (qc and not todo) or st == "done": fr = [1] * 5; left = ""; note[3] = f"{made} made" + (f", {len(todo)} not made" if todo else "")
+    if st == "done" and made: fr = [1] * 5; left = ""; note[3] = f"{made} made" + (f", {len(todo)} not made" if todo else "")  # 100% only when the run really ended AND Shorts exist on disk: never while still working
     names = ["Download", "Transcribe", "Pick moments", "Render", "Quality check"]
     w = [10, 40, 15, 30, 5]; pct = round(sum(a * b for a, b in zip(fr, w)))
+    if st == "running": pct = min(max(pct, 1), 99)  # shows at least 1% from the click, and 100 is kept for a finished run
     act = next((i for i, f in enumerate(fr) if f < 1), None)
     steps = [dict(label=n, state="done" if fr[i] >= 1 else ("failed" if st == "failed" and i == act else "active" if i == act and st == "running" else "todo"), note=note[i]) for i, n in enumerate(names)]
     now_txt = "Finished" if pct >= 100 else "Stopped" if st == "failed" else ("Working on: " + names[act].lower() if act is not None else "")
-    return dict(pct=min(pct, 100), now=now_txt, left=left if st == "running" else "", steps=steps, status=st)
+    if st == "done" and not made: now_txt = "Finished, but no Shorts were made"; pct = min(pct, 99)
+    return dict(pct=min(pct, 100), now=now_txt, left=left if st == "running" else "", steps=steps, status=st, made=made)
 
 OK_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "twitch.tv", "www.twitch.tv", "m.twitch.tv", "kick.com", "www.kick.com",
             "tiktok.com", "www.tiktok.com", "vm.tiktok.com", "vt.tiktok.com", "x.com", "twitter.com", "mobile.twitter.com", "instagram.com", "www.instagram.com",

@@ -102,6 +102,20 @@ def durations(p):
     out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration", "-of", "csv=p=0", str(p)], capture_output=True, text=True).stdout
     return {l.split(",")[0]: float(l.split(",")[1]) for l in out.split() if l.count(",") == 1 and l.split(",")[1] not in ("", "N/A")}
 
+def ffmpeg_live(cmd, total, prog, timeout, **k):
+    """Run ffmpeg like subprocess.run(check=True) and write {done, total} (seconds of the Short encoded) to `prog` every 2 s: the app turns it into a real render percentage."""
+    import threading
+    p = subprocess.Popen([cmd[0], "-progress", "pipe:1", "-nostats", *cmd[1:]], stdout=subprocess.PIPE, text=True, **k)
+    t = threading.Timer(timeout, p.kill); t.start(); last = 0.0
+    try:
+        for l in p.stdout:
+            if l.startswith("out_time_us=") and time.time() - last >= 2 and l[12:].strip().lstrip("-").isdigit():
+                last = time.time()
+                try: Path(prog).write_text(json.dumps(dict(done=round(max(int(l[12:]), 0) / 1e6, 1), total=round(total, 1), t=last)), encoding="utf-8")
+                except OSError: pass  # progress is a courtesy, never a reason to fail the render
+        if p.wait(): raise subprocess.CalledProcessError(p.returncode, cmd)
+    finally: t.cancel(); p.stdout.close()
+
 def loudnorm_stats(stderr): return json.loads(re.findall(r"\{[^{}]*\}", stderr, re.S)[-1])
 
 def fix_loudness(path):
@@ -694,9 +708,16 @@ def main(src, tjson, start, end, hook, out, keys="", style="", layout="", opts="
     for k, (suf, H, y0) in enumerate(branches):
         fg += f"[s{k}]" + (f"crop=1080:{H}:0:{y0}," if H != 1920 else "") + f"ass=cap{k}.ass:fontsdir=.[c{k}];" + deco(k, H, y0, f"c{k}", f"o{k}")
     fg += f"[ac]{dn}{ln}[an];" + whoosh(punch) + f"afade=t=out:st={max(new_dur - 0.08, 0):.2f}:d=0.08" + (f",asplit={nb}" + "".join(f"[a{k}]" for k in range(nb)) if nb > 1 else "[a0]") + ";"  # hard cut on the punchline (refs end on the peak, no fade); 80 ms only to avoid a click
-    outs = []
-    for k, (suf, H, y0) in enumerate(branches): outs += ["-map", f"[o{k}]", "-map", f"[a{k}]", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", str((out.parent / (out.stem + suf + out.suffix)).resolve())]
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", v916.name, *extra, "-filter_complex", fg.rstrip(";"), *outs], check=True, cwd=work, timeout=600 + 30 * new_dur)
+    prog = out.with_suffix(".progress")  # the app reads this for the real render percentage of this Short
+    def encode(cpu):  # GPU encoder when one works on this PC; if it fails halfway the same Short is encoded again on the CPU
+        outs = []
+        for k, (suf, H, y0) in enumerate(branches): outs += ["-map", f"[o{k}]", "-map", f"[a{k}]", *reframe.encoder(18, cpu), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", str((out.parent / (out.stem + suf + out.suffix)).resolve())]
+        ffmpeg_live(["ffmpeg", "-y", "-loglevel", "error", "-i", v916.name, *extra, "-filter_complex", fg.rstrip(";"), *outs], new_dur, prog, 600 + 30 * new_dur, cwd=work)
+    try: encode(False)
+    except (subprocess.CalledProcessError, OSError) as e:
+        if not reframe.gpu_encoder(): raise
+        print("  GPU encoder failed, encoding on the CPU instead:", e); encode(True)
+    prog.unlink(missing_ok=True)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "1", "-i", str(out.resolve()), "-frames:v", "1", "-q:v", "2", str(out.with_name(out.stem + "_cover.jpg").resolve())])  # fresh cover (frame at 1 s) for a Short re-cut with clip.py alone
     cut = dur - new_dur - lead
     json.dump(dict(took_s=round(time.time() - T0, 1), length=round(new_dur, 2), source_start=round(start + lead, 2), seg_start=round(start, 3), source_end=round(end, 2), kept_spans=[[round(a, 2), round(b, 2)] for a, b in spans], dead_air_cut=round(cut, 2),

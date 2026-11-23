@@ -187,10 +187,25 @@ def plan(path):
     xs = np.clip(xs, cw / 2, W - cw / 2)
     return dict(W=W, H=H, fps=fps, cw=cw, N=N, shots=shotlog), xs, mode
 
-def encoder():
-    """NVIDIA GPU encoder if it really works on this PC, else CPU x264 (works everywhere)."""
-    probe = subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=256x256", "-frames:v", "1", "-c:v", "h264_nvenc", "-f", "null", "-"], capture_output=True)
-    return ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "19"] if probe.returncode == 0 else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "19"]
+GPU_ENC = {  # hardware H.264 encoders, tried in this order; each is used only if a 1-frame test encode really works on this PC
+    "h264_nvenc": lambda q: ["-preset", "p5", "-cq", str(q)],          # NVIDIA (Windows, Linux)
+    "h264_qsv": lambda q: ["-global_quality", str(q)],                 # Intel (Windows, Linux)
+    "h264_amf": lambda q: ["-rc", "cqp", "-qp_i", str(q), "-qp_p", str(q)],  # AMD (Windows)
+}
+_ENC = []  # the working GPU encoder, probed once per process ([None] = none works)
+
+def gpu_encoder():
+    if not _ENC:
+        _ENC.append(None)
+        for name in GPU_ENC:
+            probe = subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=256x256", "-frames:v", "1", "-c:v", name, "-pix_fmt", "yuv420p", "-f", "null", "-"], capture_output=True)
+            if probe.returncode == 0: _ENC[0] = name; break
+    return _ENC[0]
+
+def encoder(q=19, cpu=False):
+    """GPU encoder if one really works on this PC (NVIDIA, Intel, AMD), else CPU x264 (works everywhere). cpu=True forces x264: the retry when a GPU encode fails."""
+    g = None if cpu else gpu_encoder()
+    return ["-c:v", g, *GPU_ENC[g](q)] if g else ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(q)]
 
 TOP_CUT = 0.08  # stream overlays (viewer counters, alerts) sit in the top strip: crop it off, which also zooms the face a little
 BAND = (.15, .10, .15, .20)  # left/top/right/bottom share of the source frame where stream widgets live; a blob centred there is overlay, deeper in is game
