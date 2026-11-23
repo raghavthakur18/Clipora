@@ -379,7 +379,7 @@ async function renderYtSettings(container, api) {
 }
 
 const $=s=>document.querySelector(s),E=x=>document.getElementById(x),enc=encodeURIComponent;
-const TOKEN='__TOKEN__';const api=(p,b)=>fetch(p,b?{method:'POST',headers:{'X-App':TOKEN,'Content-Type':'application/json'},body:JSON.stringify(b)}:{}).then(r=>r.json()).catch(()=>({error:'The app is not answering. Is its window still open?'}));
+const TOKEN='__TOKEN__';const api=(p,b)=>fetch(p,b?{method:'POST',headers:{'X-App':TOKEN,'Content-Type':'application/json'},body:JSON.stringify(b)}:{}).then(r=>r.json()).then(j=>{if(j&&j.error=='missing or wrong token')stale();return j}).catch(()=>({error:'The app is not answering. Is its window still open?'}));
 const arr=x=>Array.isArray(x)?x:[];
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const opt=(a,v)=>a.map(x=>`<option ${x==v?'selected':''}>${x}</option>`).join('');
@@ -397,6 +397,7 @@ function dayLabel(d){const t=new Date();t.setHours(0,0,0,0);const x=new Date(d+'
 function ask(text,o={}){return new Promise(res=>{const d=E('dlg');E('dlg_t').textContent=text;E('dlg_p').hidden=!o.pre;E('dlg_p').textContent=o.pre||'';
  E('dlg_ok').textContent=o.ok||'OK';E('dlg_ok').className=o.danger?'d':'p';E('dlg_no').hidden=!!o.info;E('dlg_no').textContent=o.no||'Cancel';d.returnValue='';d.onclose=()=>res(d.returnValue=='ok');d.showModal();E(o.info?'dlg_ok':'dlg_no').focus()})}
 const tell=t=>ask(t,{info:1});
+function stale(){try{const n=Date.now(),l=+sessionStorage.getItem('reload_at')||0;if(n-l<10000)return;sessionStorage.setItem('reload_at',n)}catch(e){}toast('Clipora was restarted: reloading this page...',true);setTimeout(()=>location.reload(),1200)}
 function toast(t,err){const x=E('toast');x.textContent=t;x.className=err?'err':'';x.style.display='block';x.onclick=()=>x.style.display='none';clearTimeout(x._t);x._t=setTimeout(()=>x.style.display='none',5000)}
 const empty0={shorts:[],ais:['claude'],styles:[],formats:[],layouts:[],memes:[],style_info:{},run_ais:['claude']};
 function skel(){E('main').setAttribute('aria-busy','true');E('main').innerHTML=`<div class=grid>${'<div class="card sk"></div>'.repeat(6)}</div>`}
