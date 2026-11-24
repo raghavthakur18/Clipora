@@ -58,14 +58,42 @@ Other screens:
 - **Brand:** your caption colours, font, watermark and end card.
 - **Settings:** language (English, Hindi and more), English captions for any spoken language, dark mode, and the AI tool.
 
-**Captions by default:** English speech gets English captions. Other languages keep their own language. Hindi is written in English letters ("kya baat hai"), never in Devanagari script. Turn on **English captions** in Settings to translate everything to English.
+**Captions by default:** English speech gets English captions. Other languages keep their own language. Hindi is written in English letters (for example "mein", "hum", "toh"), never in Devanagari script. Turn on **English captions** in Settings to translate everything to English. Captions come from speech recognition, so **some words can still be misheard, especially in Hindi: read the captions before you post a reel.** See **Caption accuracy** below.
 
 ## What you need
 
 - Windows 10/11, macOS or Linux, and about 5 GB of free space.
 - An internet connection for the first setup and for downloading videos.
 - Optional: a graphics card. An NVIDIA card makes the transcribe step much faster. NVIDIA, Intel and AMD cards are also used to speed up the final render when ffmpeg can use them; otherwise Clipora renders on the CPU.
-- An AI tool picks the best moments. **Claude Code** gives the best results. Codex, Gemini CLI, OpenCode or Ollama also work, and **No AI** mode works with nothing installed. Change it in **Settings**.
+- An AI tool picks the best moments. **Antigravity CLI** is the default (it works with a Google account and has an allowance set by Google). **OpenCode** has free models that need no account, and **No AI** mode works with nothing installed. Claude Code, Codex, Kimi, Ollama and Gemini CLI (only on a company plan or a paid key) also work. Change it in **Settings > AI tool**. If a tool is missing, Settings shows how to install it (see **AI tools** below).
+
+## AI tools: setup and automatic switching
+
+- **Default:** Antigravity CLI. If it is not installed yet, Clipora still works: it picks moments without AI and Settings shows the steps to set Antigravity up.
+- **Install for me (Windows):** in **Settings > AI tool**, a tool that is not found shows an **Install for me** button for Antigravity, OpenCode and Claude Code. It first shows the exact commands, then runs them only after you press **Yes, install**, and shows the progress. Windows may ask for administrator permission. **Clipora never signs in for you:** if a tool needs a sign-in (Antigravity does: type `agy` once and sign in with Google in your browser), you do that yourself. On Mac and Linux, and for other tools, Settings shows the steps to follow by hand.
+- **Automatic switching:** when you press Create Reels, the picking step tries your chosen tool first. If it runs out of quota, crashes, hangs, is not installed, or gives unusable picks, Clipora moves on to the next one: **Antigravity, then OpenCode, then No AI** (which always works). A tool that ran out of quota is skipped for an hour so later runs do not wait for it. Turn it off with **Auto-switch** in Settings. Choosing **No AI** is always respected: no AI tool is ever called.
+- **Free usage:** Antigravity's free allowance and its limits are set by Google, are not published as numbers, and can differ from account to account or change. OpenCode's free models are free for a limited time, some of them keep your data, and their picks are usually weaker. **No AI** is free with no limit but picks only from loudness, chat and keywords.
+
+## Caption accuracy
+
+**Settings > Caption accuracy** has three choices:
+
+- **Fast:** the small speech model. Works on any computer. Hindi is often misheard.
+- **Accurate:** the large model (`large-v3-turbo`, about 1.6 GB, downloaded the first time you use it). Needs an NVIDIA graphics card with about 6 GB or more.
+- **Auto (default):** uses the large model only when the graphics card is big enough **and** the model is already downloaded. It never starts a large download by itself. Choose **Accurate** once to download it. If the large model cannot start, Clipora falls back to the small one.
+
+English-captions mode always uses the small model. Hindi spelling in English letters uses a table of common everyday words ("mein", "hum", "toh", "police", "game"...).
+
+## What was tested (and what was not)
+
+Checked on one Windows 11 laptop with a 6 GB NVIDIA graphics card, with one 16-minute Hindi gaming video:
+
+- **Automatic tests** (`python test_switch.py`, `python test_captions.py`, `python test_install.py`): the switching between tools (quota errors, hung or broken tools, missing tools, No AI), the caption model choice and its fallback, the Hindi spelling table, and the install button's safety rules (fake tools, nothing is installed). All pass.
+- **Real tools:** Antigravity picked moments; OpenCode took over when Antigravity was paused or returned a quota error; with both failing, No AI picks worked.
+- **Full runs from Create Reels** (2 reels): about 20 minutes in total with Antigravity: transcribing about 4 minutes with the large model (about 10 minutes with the small one), picking 3 to 11 minutes (varies), rendering about 5 minutes. With OpenCode the picking took about 1 minute.
+- **Install for me:** the real Windows installer path ran and its progress and error messages showed in Settings. A fresh install of a missing tool through the button was **not** tested.
+- **Caption quality:** much better than with the small model, but **not accurate yet**: in the test video some Hindi words were still misheard, and spelling was better than before.
+- **Not tested:** Mac, Linux, graphics cards smaller than 6 GB, computers without a graphics card, and other users' free Antigravity limits.
 
 ## Good to know
 
