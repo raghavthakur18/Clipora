@@ -18,8 +18,32 @@ def spoken_language(model, secs=240):
     try: return model.detect_language(a, vad_filter=True, language_detection_segments=4)[0]
     except Exception: return None  # detection is a courtesy: Whisper still finds the language itself
 
+# Caption accuracy (Settings): fast = the small model; accurate = the large one (better Hindi, needs an NVIDIA card, ~1.6 GB download on first use);
+# auto (default) = the large one only when the card has the memory AND it is already downloaded: it never starts a big download by itself.
+ACC = os.environ.get("TRANSCRIBE_ACCURACY", "auto")
+BIG, BIG_MIN_MB = "large-v3-turbo", 6000
+def gpu_mb():
+    try: return int(subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout.split()[0])
+    except Exception: return 0  # no NVIDIA card / no driver
+def have_model(name):
+    try:
+        from faster_whisper.utils import download_model
+        download_model(name, local_files_only=True); return True
+    except Exception: return False
+def choose_model(device):
+    small = "small" if device == "cuda" else "base"  # base on CPU: ~3x faster, fine for English
+    if size: return size
+    if device != "cuda" or ACC == "fast" or TASK == "translate": return small  # translate (English captions): the large turbo model is not trained for it and answered in Hindi script in the 24 Nov test
+    if ACC == "accurate": return BIG
+    return BIG if gpu_mb() >= BIG_MIN_MB and have_model(BIG) else small
+
 def run(device, ct):
-    model = WhisperModel(size or ("small" if device == "cuda" else "base"), device=device, compute_type=ct)  # base on CPU: ~3x faster, fine for English
+    name = choose_model(device); small = "small" if device == "cuda" else "base"
+    try: model = WhisperModel(name, device=device, compute_type="int8_float16" if name == BIG else ct)
+    except Exception as e:
+        if name != BIG: raise
+        print("accurate caption model could not start (", str(e)[:80], ") -> fast model", flush=True); name = small; model = WhisperModel(name, device=device, compute_type=ct)
+    print("caption model:", name, flush=True)
     lang = spoken_language(model)
     prompt = VOCAB if lang == "en" or TASK == "translate" else None  # the English word list throws Whisper off on other languages (Hindi came out as junk symbols)
     segs, info = model.transcribe(sys.argv[1], word_timestamps=True, vad_filter=True, initial_prompt=prompt, task=TASK, language=lang)
@@ -53,6 +77,29 @@ def loud_tags(segments, db):
     hot = sorted((i for i in peaks if (peaks[i] >= top and peaks[i] - base >= 6) or jump[i] >= 9), key=lambda i: -lift[i])[:max(3, len(segments) // 20)]  # loudest 5% at most
     return {i: f" [LOUD +{lift[i]:.0f}dB]" for i in hot}
 
+def clean_bad(data):
+    """Whisper sometimes ends a word on half a character (U+FFFD): it would show as an empty box in a caption."""
+    bad = chr(0xFFFD)
+    for sg in data:
+        sg["words"] = [w for w in (dict(x, w=x["w"].replace(bad, "").strip()) for x in sg["words"]) if w["w"]]; sg["text"] = sg["text"].replace(bad, "").strip()
+    return data
+def _line(ws):
+    text = " ".join(w["w"] for w in ws)
+    return dict(start=ws[0]["s"], end=ws[-1]["e"], text=text[:1].upper() + text[1:], words=ws)
+def resplit(data, soft=6.0, hard=10.0, pause=0.45):
+    """The large model writes very long lines (up to 30 s of speech in one). The moment shortlist, the sentence snapping and the caption lines are built for short lines like the small model's (about 2 s), and found NO candidate moment on long ones (24 Nov test). So each long line is cut at the pauses between words; short lines are left alone."""
+    out = []
+    for sg in data:
+        ws = sg["words"]
+        if sg["end"] - sg["start"] <= soft or len(ws) < 2: out.append(sg); continue
+        cur = [ws[0]]
+        for w in ws[1:]:
+            dur, gap = w["e"] - cur[0]["s"], w["s"] - cur[-1]["e"]
+            if (gap >= pause and dur >= 2.0) or (dur >= soft and gap >= 0.15) or dur >= hard: out.append(_line(cur)); cur = [w]
+            else: cur.append(w)
+        out.append(_line(cur))
+    return out
+
 if __name__ == "__main__":
     src, out = sys.argv[1], sys.argv[2]
     try:
@@ -66,6 +113,7 @@ if __name__ == "__main__":
         for sg in data:
             sg["text"] = roman(sg["text"]); sg["text"] = sg["text"][:1].upper() + sg["text"][1:]
             for w in sg["words"]: w["w"] = roman(w["w"])
+    data = resplit(clean_bad(data))
     tags = loud_tags(data, loudness(src))
     off = float(os.environ.get("TRANSCRIBE_OFFSET", 0))  # audio was a window of a long VOD: shift to full-VOD times
     for sg in data: sg["start"] = round(sg["start"] + off, 2); sg["end"] = round(sg["end"] + off, 2); [w.update(s=round(w["s"] + off, 2), e=round(w["e"] + off, 2)) for w in sg["words"]]

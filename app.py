@@ -37,6 +37,10 @@ PROV = {
 }
 AI = {k: v["text"] for k, v in PROV.items() if v["text"] and k != "ollama"}   # kept for old callers
 AI_RUN = {k: v["run"] for k, v in PROV.items() if v["run"]}
+DEFAULT_AI = "antigravity"   # free with a Google account; a machine without it still works (No AI picks) and Settings shows the setup steps
+OSKEY = "windows" if os.name == "nt" else "mac" if sys.platform == "darwin" else "linux"
+try: SETUP = {k: v for k, v in json.loads((HERE / "ai_setup.json").read_text(encoding="utf-8")).items() if not k.startswith("_")}
+except (OSError, ValueError): SETUP = {}
 EDITABLE = set("start end hook title hashtags credit keywords style layout format parts meme meme_at music position watermark watermark_pos watermark_opacity watermark_size progress endcard aspects lang flash lift fillers blackfix denoise squeeze".split())
 
 
@@ -89,7 +93,7 @@ BRAND = brand_norm({})
 def exe(cmd):  # Windows: claude/codex are .cmd shims; resolve the full path so CreateProcess finds them
     return [shutil.which(cmd[0]) or cmd[0]] + cmd[1:]
 def cur_ai():
-    a = env().get("AI", "claude"); return a if a in PROV else "claude"
+    a = env().get("AI", DEFAULT_AI); return a if a in PROV else DEFAULT_AI
 PICK_EST = {"smart": "about 8-25% of a Claude Pro session per 10 Reels (~$1 API-equivalent)", "deep": "about 30-90% of a Pro session per 10 Reels (~$3.5)", "free": "no AI usage"}  # measured 18 Nov (research/round14/COST.md): Pro limits are not published, so ranges; check /usage once to calibrate
 PICK_INFO = {"smart": "AI reads a shortlist of the 30 best windows and may widen them. Best value.", "deep": "AI reads the full transcripts. Can catch quiet stories the shortlist misses; about 3-4x the usage of Smart.", "free": "No AI: loudness, chat and keyword scoring, rendered automatically. Weakest picks, 0 tokens."}
 LIVE_INFO = {"free": "Cut on chat or loudness spikes only. 0 tokens.", "smart": "On each spike the AI sees that clip's words and tags and answers keep/drop, start/end and hook (about 1-4% of a Pro session per spike, 37k tokens incl. Claude Code startup; cap per hour below).", "deep": "Smart, plus the last 5 minutes of chat context per spike."}
@@ -99,7 +103,7 @@ def pick_cfg(E=None):
     except ValueError: cap = 20
     return dict(mode=g("PICK_MODE", "smart", PICK_EST), live_mode=g("LIVE_MODE", "free", LIVE_INFO), live_cap=cap)
 def pick_mode(): return pick_cfg()["mode"]
-def eff_ai(ai): return "none" if pick_mode() == "free" and ai not in ("none", "ollama") else ai  # free = nopick + batch chain, no AI tokens
+def eff_ai(ai): return "none" if (pick_mode() == "free" and ai not in ("none", "ollama")) or (ai not in ("none", "custom") and not installed(ai)) else ai  # free = nopick + batch chain, no AI tokens; a tool that is not installed = No AI, never a failed run
 def pickmode_api(d=None):
     if d:
         E = env()
@@ -118,8 +122,13 @@ def prov_bin(i):
     if shutil.which(b): return shutil.which(b)
     if i == "kimi" and KIMI.exists(): return str(KIMI)
     if i == "antigravity" and os.name == "nt":  # winget installs it here; PATH only updates in new shells
-        g = sorted(Path(os.environ.get("LOCALAPPDATA", "")).glob("Microsoft/WinGet/Packages/Google.AntigravityCLI_*/agy.exe"))
+        g = sorted(Path(os.environ.get("LOCALAPPDATA", "")).glob("Microsoft/WinGet/Packages/Google.AntigravityCLI_*/agy.exe")) + [Path(os.environ.get("LOCALAPPDATA", "")) / "agy" / "bin" / "agy.exe"]  # 2nd = Google's own installer script
+        g = [x for x in g if x.exists()]
         if g: return str(g[-1])
+    if i == "antigravity" and os.name != "nt" and (Path.home() / ".local" / "bin" / "agy").exists(): return str(Path.home() / ".local" / "bin" / "agy")  # Google's installer script
+    if i == "opencode":  # npm's global folder is not always on this app's PATH (a window opened before the install)
+        for x in ([Path(os.environ.get("APPDATA", "")) / "npm" / "opencode.cmd"] if os.name == "nt" else []) + [Path.home() / ".opencode" / "bin" / "opencode", Path.home() / ".local" / "bin" / "opencode"]:
+            if x.exists(): return str(x)
     return None
 def custom_cmd(E=None):
     t = (E or env()).get("AI_CUSTOM", "").strip()
@@ -137,7 +146,7 @@ def ai_cmd(i, run=False):
     if i == "custom": return custom_cmd()
     if i == "ollama": return ["ollama", "run", env().get("AI_OLLAMA_MODEL", "llama3.1")]
     c = PROV[i]["run"] if run else PROV[i]["text"]
-    return [prov_bin(i) or c[0]] + c[1:] if i in ("kimi", "antigravity") else list(c)
+    return [prov_bin(i) or c[0]] + c[1:] if i in ("kimi", "antigravity", "opencode") else list(c)
 def feed(cmd, prompt, dry=False):  # -> (cmd, stdin). {prompt_file} in the command = prompt goes to a file instead of stdin
     if not any("{prompt_file}" in c for c in cmd): return cmd, prompt
     pf = WS / "ai_prompts" / f"p_{int(time.time() * 1000)}.txt"
@@ -146,35 +155,143 @@ def feed(cmd, prompt, dry=False):  # -> (cmd, stdin). {prompt_file} in the comma
 def chain_cmd(folder, n, ai): return [sys.executable, str(HERE / "app.py"), "--chain", str(folder), str(n), ai]
 def chain_text(folder, n):
     return f'"{sys.executable}" "{HERE / "nopick.py"}" "{folder}" {n}  ;  "{sys.executable}" "{HERE / "batch.py"}" "{Path(folder) / "picks.json"}" "{folder}"'
-CHAIN_AI = ("none", "ollama", "antigravity")  # app-run chain; antigravity only picks: agy -p kills background steps after 30 min idle (agy102)
+CHAIN_AI = ("none", "ollama", "antigravity", "opencode")  # app-run chain; antigravity only picks: agy -p kills background steps after 30 min idle (agy102)
 def run_cmd(ai, n, folder, prompt, dry=False):  # -> (cmd, stdin, shown_prompt): tool AIs run the whole job; none/ollama = nopick + batch chain
     if ai in ("none", "ollama"): return chain_cmd(folder, n, ai), None, "No tool-running AI: " + chain_text(folder, n)
-    if ai == "antigravity" and not prompt_twitch(prompt): return chain_cmd(folder, n, ai), None, "The app downloads, transcribes and renders; Antigravity picks the moments. " + chain_text(folder, n)
+    if ai in ("antigravity", "opencode") and not prompt_twitch(prompt): return chain_cmd(folder, n, ai), None, f"The app downloads, transcribes and renders; {PROV[ai]['label']} picks the moments (then the next free tool if it fails). " + chain_text(folder, n)
     cmd, stdin = feed(ai_cmd(ai, True), prompt, dry); return cmd, stdin, prompt
 def providers():
     out = []
     for i, v in PROV.items():
         try: pv = " ".join(ai_cmd(i, v["tools"])) if i != "none" else chain_text("<run folder>", "N")
         except ValueError: pv = "(set custom_cmd)"
-        out.append(dict(id=i, label=v["label"], installed=installed(i), cmd_preview=pv, quality_note=v["note"], can_run_tools=v["tools"]))
+        out.append(dict(id=i, label=v["label"], installed=installed(i), cmd_preview=pv, quality_note=v["note"], can_run_tools=v["tools"], setup=setup_info(i)))
     return out
+def setup_info(i):  # the steps to install + sign in, for this computer's system (Settings shows them when the tool is not found)
+    s = SETUP.get(i)
+    if not s: return None
+    return dict(site=s.get("site", ""), steps=list(s.get(OSKEY, [])) + list(s.get("login", [])), checked=OSKEY in s.get("verified", []), install=[dict(label=x["label"], cmd=" ".join(x["cmd"]), skip=bool(x.get("skip_if_found") and have_prog(x["skip_if_found"]))) for x in install_steps(i)])
+def doctor(i):  # is the tool found, and (Antigravity only) how much of its free quota is left: its own /usage answers instantly and costs no tokens
+    if i not in PROV or i == "none": raise ValueError("pick a real AI tool")
+    out = dict(id=i, installed=installed(i), tool=Path(prov_bin(i) or PROV[i]["bin"] or "").name, quota=None)
+    if i == "antigravity" and out["installed"]:
+        try:
+            r = subprocess.run([prov_bin(i), "-p", "/usage", "--output-format", "json"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, cwd=str(HERE))
+            g = json.loads(r.stdout)["command"]["data"]["groups"]
+            out["quota"] = [dict(group=x["name"], **{b["window"]: round(100 * b["remaining_fraction"], 1) for b in x["buckets"]}) for x in g]  # % left per group: weekly, 5h
+        except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired): pass
+    return out
+# ---------- Install button: runs the checked install commands of ai_setup.json (fixed lists, never built from what a user types); the page asks first ----------
+INSTALL_STEP_SECS = 1200   # one install step that runs longer than this (a stalled download) is stopped, so the screen never waits forever
+WINGET_OK = (0, 0x8A15002B, 0x8A15002B - 2 ** 32)   # 0x8A15002B = already installed / nothing to upgrade (Windows reports it signed or unsigned)
+def install_steps(i): return list(((SETUP.get(i) or {}).get("install") or {}).get(OSKEY, []))
+def npm_exe():
+    w = shutil.which("npm")
+    if w: return w
+    x = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs" / "npm.cmd"
+    return str(x) if x.exists() else None
+def have_prog(name): return bool(npm_exe() if name == "npm" else shutil.which(name))
+def install_env():   # a Node.js installed a minute ago is not on this app's PATH yet
+    e = dict(os.environ); nd = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs"
+    if nd.exists(): e["PATH"] = str(nd) + os.pathsep + e.get("PATH", "")
+    return e
+def install_job(jid, i):
+    J = JOBS[jid]; w = lambda l: J["log"].append(l[-300:])
+    try:
+        for s in install_steps(i):
+            if s.get("skip_if_found") and have_prog(s["skip_if_found"]): w(f"skip: {s['label']} (already installed)"); continue
+            cmd = list(s["cmd"]); exe0 = npm_exe() if cmd[0] == "npm" else shutil.which(cmd[0])
+            if not exe0: w(f"{cmd[0]} was not found on this computer, so the step '{s['label']}' cannot run. Use the manual steps instead."); J["status"] = "failed"; return
+            w(f"step: {s['label']}"); w("$ " + " ".join(cmd))
+            pr = subprocess.Popen([exe0] + cmd[1:], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", env=install_env())
+            stopped = []; timer = threading.Timer(INSTALL_STEP_SECS, lambda: (stopped.append(1), pr.kill())); timer.start()
+            try:
+                for l in pr.stdout:
+                    l = l.strip()
+                    if l and not set(l) <= set("-"+chr(92)+"|/█▒ "): w(l)   # no spinner / progress-bar noise
+                rc = pr.wait()
+            finally: timer.cancel()
+            if stopped: w(f"step stopped: it ran longer than {INSTALL_STEP_SECS // 60} minutes (a stalled download?). Try again, or use the manual steps."); J["status"] = "failed"; return
+            if not (rc == 0 or (cmd[0] == "winget" and rc in WINGET_OK)):
+                w(f"step failed (exit code {rc})")
+                if any("has been modified" in x for x in J["log"][-6:]): w("hint: this tool is already installed on this computer (it may have updated itself). Close Clipora, open it again, and press Check again.")
+                J["status"] = "failed"; return
+        w("check: found on this computer" if installed(i) else "check: installed, but this window cannot see it yet: close Clipora and open it again")
+        J["status"] = "done"
+    except Exception as e: w(f"error: {type(e).__name__}: {str(e)[:200]}"); J["status"] = "failed"
+def start_install(i):  # -> job id; ValueError when there is no checked one-click install here or one is already running
+    if i not in PROV or not install_steps(i): raise ValueError("no one-click install for this tool on this computer: use the steps shown")
+    if any(j["kind"] == "install" and j["status"] == "running" for j in JOBS.values()): raise ValueError("an install is already running")
+    jid = str(int(time.time() * 1000)); JOBS[jid] = dict(id=jid, kind="install", label=PROV[i]["label"], status="running", log=[], t=time.time(), dry=False)
+    threading.Thread(target=install_job, args=(jid, i), daemon=True).start(); return jid
 def text_ai(cmd, prompt, timeout=180):
     cmd, stdin = feed(cmd, prompt)
     r = subprocess.run(exe(cmd), input=stdin, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, cwd=str(HERE))
     if r.returncode: raise RuntimeError((r.stderr or r.stdout)[-300:])
     return r.stdout
 def prompt_twitch(prompt): return "the latest VOD of the Twitch streamer" in prompt  # chain cannot fetch a streamer's latest VOD: full agent run
-def agy_pick(folder, clips, n, pf):  # Antigravity picks only (minutes, under its 30 min cap); the app renders
-    py = sys.executable
-    global WS; WS = WS or Path(folder)  # --chain runs without a workspace: the prompt file goes in the run folder
-    if subprocess.run([py, str(HERE / "nopick.py"), str(clips), "--candidates", "30"]).returncode: return False
-    pr = (f"Use the gta6-clipper skill. Its folder is {HERE} (read SKILL.md there, step 2 pick rules). Read only {clips / 'candidates.txt'} and write {pf} with the {n} best picks "
-          "in the picks.json format of SKILL.md. Do NOT run batch.py, clip.py or any render or download: only write that one file, then stop. Never ask me a question.")
-    cmd, stdin = feed(ai_cmd("antigravity", True), pr)
-    try: subprocess.run(exe(cmd), input=stdin, text=True, encoding="utf-8", errors="replace", timeout=2700, cwd=str(folder))  # foreground pick: agy has no cap on it; 3 picks took 22 min
-    except (OSError, subprocess.TimeoutExpired) as e: print("antigravity pick failed:", e)
-    try: return isinstance(json.loads(pf.read_text(encoding="utf-8")), list)
+# ---------- auto-switch: the pick step tries the chosen AI, then the next free one, and always ends on No AI ----------
+SWITCH_FILE = Path.home() / ".clipora" / "switch.json"   # tool -> time until it is skipped (its quota ran out); outside the repo, never published
+PICKERS = ("antigravity", "opencode", "gemini", "claude", "codex", "kimi")   # tools that can read the shortlist and write picks.json
+FALLBACKS = ("antigravity", "opencode")   # tried after the chosen tool, free ones first; the paid/other tools are used only when chosen
+QUOTA_RX = r"quota reached|RESOURCE_EXHAUSTED|rate.?limit|usage limit|exhausted|too many requests|\b429\b"
+LOW_QUOTA = 3.0   # Antigravity is skipped when this % or less of its limit is left (its own /usage tells, no tokens)
+def autoswitch(): return env().get("AI_AUTOSWITCH", "1") != "0"
+def cooldowns():
+    try: return {k: v for k, v in json.loads(SWITCH_FILE.read_text(encoding="utf-8")).items() if isinstance(v, (int, float)) and v > time.time()}
+    except (OSError, ValueError, AttributeError): return {}
+def cool(tool, secs):
+    d = cooldowns(); d[tool] = time.time() + secs
+    try: SWITCH_FILE.parent.mkdir(parents=True, exist_ok=True); SWITCH_FILE.write_text(json.dumps(d), encoding="utf-8")
+    except OSError: pass
+def quota_low(t):
+    if t != "antigravity": return ""
+    q = doctor(t).get("quota") or []
+    left = [min(v for k, v in g.items() if k != "group") for g in q if len(g) > 1]
+    return f"only {max(left):.0f}% of its limit is left" if left and max(left) <= LOW_QUOTA else ""   # skipped only when every group is low: a failed call also moves on
+def skip_reason(t):
+    if not installed(t): return "not installed"
+    u = cooldowns().get(t)
+    if u: return f"quota ran out, skipped for {int((u - time.time()) / 60) + 1} more min"
+    return quota_low(t)
+def chain_order(first):
+    if first not in PICKERS: return []   # No AI / Ollama chosen: the user wants no cloud tool, never switch to one
+    order = [first]
+    if autoswitch(): order += [x for x in FALLBACKS if x not in order]
+    return order
+def valid_picks(pf):
+    try: p = json.loads(pf.read_text(encoding="utf-8"))
     except (OSError, ValueError): return False
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+    return isinstance(p, list) and bool(p) and all(isinstance(x, dict) and num(x.get("start")) and num(x.get("end")) and x["end"] > x["start"] and x.get("transcript") for x in p)
+def pick_prompt(clips, n, pf):
+    return (f"Use the gta6-clipper skill. Its folder is {HERE} (read SKILL.md there, step 2 pick rules). Read only {clips / 'candidates.txt'} and write {pf} with the {n} best picks "
+            "in the picks.json format of SKILL.md. Do NOT run batch.py, clip.py or any render or download: only write that one file, then stop. Never ask me a question.")
+def say(s):  # print a tool's answer without ever crashing on a character the console cannot show (Windows cp1252 vs a non-breaking hyphen: run 24 Nov)
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"; print(str(s).encode(enc, "replace").decode(enc, "replace"), flush=True)
+def pick_with(t, folder, clips, n, pf, timeout=2700):  # one tool picks (minutes, the app renders) -> (ok, why it failed)
+    pf.unlink(missing_ok=True)
+    try: cmd, stdin = feed(ai_cmd(t, True), pick_prompt(clips, n, pf))
+    except ValueError as e: return False, str(e)
+    try: r = subprocess.run(exe(cmd), input=stdin, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, cwd=str(folder))
+    except subprocess.TimeoutExpired: return False, f"no answer after {timeout // 60} min"
+    except OSError as e: return False, str(e)[:200]
+    out = (r.stdout or "") + (r.stderr or ""); say(out[-1500:])
+    if valid_picks(pf): return True, ""
+    return False, "quota" if re.search(QUOTA_RX, out, re.I) else "no valid picks.json"
+def pick_chain(folder, clips, n, pf, first, timeout=2700):  # -> the tool that wrote valid picks, or None (the caller then picks without AI)
+    global WS; WS = WS or Path(folder)  # --chain runs without a workspace: the prompt file goes in the run folder
+    if subprocess.run([sys.executable, str(HERE / "nopick.py"), str(clips), "--candidates", "30"]).returncode: return None
+    for t in chain_order(first):
+        lab = PROV[t]["label"]; why = skip_reason(t)
+        if why: print(f"switch: skipping {lab}: {why}", flush=True); continue
+        print(f"switch: trying {lab}", flush=True)
+        try: ok, why = pick_with(t, folder, clips, n, pf, timeout)
+        except Exception as e: ok, why = False, f"error: {type(e).__name__}: {str(e)[:150]}"   # one tool breaking must never stop the chain
+        if ok: print(f"switch: {lab} wrote the picks", flush=True); (folder / "picked_by.txt").write_text(t + chr(10), encoding="utf-8"); return t
+        if why == "quota": cool(t, 3600)
+        print(f"switch: {lab} failed ({why}); next", flush=True)
+    pf.unlink(missing_ok=True); print("switch: no AI tool gave picks: No-AI picks instead", flush=True); return None
 def chain_main(folder, n, ai):  # headless: nopick.py writes picks.json, (ollama polishes hooks/titles), batch.py renders
     folder = Path(folder); folder.mkdir(parents=True, exist_ok=True); py = sys.executable; npk = HERE / "nopick.py"
     if not npk.exists(): sys.exit("nopick.py is missing in " + str(HERE))
@@ -187,9 +304,8 @@ def chain_main(folder, n, ai):  # headless: nopick.py writes picks.json, (ollama
         else: sys.exit("no-AI runs take 'newest' or a video link as the source (Twitch streamers/channels need an AI tool)")
         if subprocess.run([py, str(HERE / "watch.py")] + a, cwd=str(folder)).returncode or not list((clips / "src").glob("*.txt")): sys.exit("watch.py found or transcribed nothing")
     pf = folder / "picks.json"
-    if ai == "antigravity" and agy_pick(folder, clips, n, pf): print("antigravity wrote", pf)
-    elif ai == "antigravity": print("antigravity made no picks.json: No-AI picks instead"); pf.unlink(missing_ok=True)
-    if not (ai == "antigravity" and pf.exists()) and (subprocess.run([py, str(npk), str(clips), str(n), "--out", str(pf)]).returncode or not pf.exists()): sys.exit("nopick.py made no picks.json")
+    got = pick_chain(folder, clips, n, pf, ai) if ai in PICKERS else None
+    if not (got and pf.exists()) and (subprocess.run([py, str(npk), str(clips), str(n), "--out", str(pf)]).returncode or not pf.exists()): sys.exit("nopick.py made no picks.json")
     if ai == "ollama":
         try:
             picks = json.loads(pf.read_text(encoding="utf-8")); pf.with_suffix(".json.bak").write_text(pf.read_text(encoding="utf-8"), encoding="utf-8")
@@ -521,6 +637,15 @@ def start_job(kind, cmd, envx=None, dry=False, cwd=None, stdin=None, label=""):
 def cap_env():  # transcribe.py reads TRANSCRIBE_TASK; every run and hunt started by this app inherits it. Default: captions in the spoken language (Hindi in English letters); the Settings switch makes them English
     if env().get("CAPTIONS_ENGLISH") == "1": os.environ["TRANSCRIBE_TASK"] = "translate"
     else: os.environ.pop("TRANSCRIBE_TASK", None)
+    os.environ["TRANSCRIBE_ACCURACY"] = cap_accuracy()
+CAP_ACC = ("auto", "fast", "accurate")  # Settings > Caption accuracy; transcribe.py decides the model from it (auto = the large one only if the card is big enough and it is already downloaded)
+def cap_accuracy(): a = env().get("CAPTION_ACCURACY", "auto"); return a if a in CAP_ACC else "auto"
+def gpu_mb():  # memory of the first NVIDIA card in MiB; 0 = none
+    try: return int(subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10).stdout.split()[0])
+    except Exception: return 0
+def big_model_ready():  # the large caption model is in the Hugging Face cache (checked without importing faster-whisper)
+    hub = Path(os.environ.get("HF_HUB_CACHE") or (Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface") / "hub"))
+    return any((hub / "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo" / "snapshots").glob("*/model.bin"))
 def peek_file(rid, file):
     run_file(rid, file); p = run_dir(rid).parent / "peek" / (file[3:-4] + ".jpg")
     return p if p.is_file() and WS in p.resolve().parents else None
@@ -669,12 +794,13 @@ def build_prompt(n, what, mode=None):
 def new_run(d):
     ai = d.get("ai") or cur_ai(); n = int(d.get("count") or 10)
     if ai not in PROV: raise ValueError("unknown AI: " + str(ai))
-    ai = eff_ai(ai)
+    asked = ai; ai = eff_ai(ai)
     if not 1 <= n <= 50: raise ValueError("count must be 1-50")
     what = source_what(d.get("kind", ""), d.get("source"), (d.get("window") or "").strip())
-    if ai in ("none", "ollama") and what.startswith("the latest VOD"): raise ValueError("No-AI runs take 'newest', a channel or a video link; a Twitch streamer needs an AI tool")
+    if ai in ("none", "ollama") and what.startswith("the latest VOD"): raise ValueError("No-AI runs take 'newest', a channel or a video link; a Twitch streamer needs an AI tool (set one up in Settings > AI tool)")
     folder = WS / "runs" / time.strftime("run_%Y%m%d_%H%M%S")
     cmd, stdin, shown = run_cmd(ai, n, folder, build_prompt(n, what), d.get("dry", False))
+    if ai == "none" and asked not in ("none", "custom") and not installed(asked): shown = f"NOTE: {PROV[asked]['label']} is not set up on this computer, so this run picks without AI. Settings > AI tool shows how to set it up.\n" + shown
     if ai in CHAIN_AI and not d.get("dry"): folder.mkdir(parents=True, exist_ok=True); (folder / "source.txt").write_text(what + "\n", encoding="utf-8")
     return cmd, shown, folder, stdin
 LOOK = dict(flip="flip", theme="theme", position="position", cap_size="cap_size", watermark="watermark", wm_pos="watermark_pos", wm_opacity="watermark_opacity", wm_size="watermark_size", aspects="aspects")  # app.html name -> clip.py pick key
@@ -831,8 +957,14 @@ def api56(method, path, q, d):  # -> (code, json) or None when the route is not 
             E = env(); E["CLIPPER_LANG"] = d["lang"]; save_env(E)
         return 200, dict(lang=get_lang(), langs=LANGS)
     if path == "/api/captions":  # english=true: Whisper writes English captions for any speech (Hindi too); new runs and live hunts. Off = spoken language (Hindi in English letters)
-        if method == "POST": E = env(); E["CAPTIONS_ENGLISH"] = "1" if d.get("english") else "0"; save_env(E); cap_env()
-        return 200, dict(english=env().get("CAPTIONS_ENGLISH") == "1")
+        if method == "POST":
+            E = env()
+            if "english" in d: E["CAPTIONS_ENGLISH"] = "1" if d.get("english") else "0"
+            if d.get("accuracy") is not None:
+                if d["accuracy"] not in CAP_ACC: return 400, dict(error=f"accuracy must be one of {list(CAP_ACC)}")
+                E["CAPTION_ACCURACY"] = d["accuracy"]
+            save_env(E); cap_env()
+        return 200, dict(english=env().get("CAPTIONS_ENGLISH") == "1", accuracy=cap_accuracy(), gpu_mb=gpu_mb(), big_ready=big_model_ready())
     if path == "/api/words" and method == "GET": return 200, reel_words(q.get("run", ""), q.get("file", ""))
     if path == "/api/hunt" and method == "GET":
         lang = q.get("lang") or get_lang(); rows = hunt.hunt(WS, streamers(lang))
@@ -890,7 +1022,7 @@ class H(BaseHTTPRequestHandler):
                 if not q.get("run"): return self.send(400, {"error": "missing ?run=<run id> (see /api/runs)"})
                 return self.send(200, dict(shorts=shorts(q["run"]), styles=styles(), layouts=["stack", "bubble", "full"], formats=formats(), style_info=style_info(), memes=MEMES,
                     ais=list(PROV), run_ais=list(PROV), ai=cur_ai()))
-            if u.path == "/api/ai": return self.send(200, dict(providers=providers(), current=cur_ai()))
+            if u.path == "/api/ai": return self.send(200, dict(providers=providers(), current=cur_ai(), default=DEFAULT_AI, autoswitch=autoswitch()))
             if u.path == "/api/themes": return self.send(200, themes())
             if u.path.startswith("/api/yt/"):
                 if q.get("run") and q.get("file") and not q.get("hook"):  # diagnose wants the on-screen hook
@@ -1028,6 +1160,10 @@ class H(BaseHTTPRequestHandler):
                 reveal(f); return self.send(200, {"ok": True})
             if p == "/api/space": return self.send(200, space(bool(d.get("delete"))))
             if p == "/api/pickfile": return self.send(200, pick_file())
+            if p == "/api/ai/doctor": return self.send(200, doctor(d.get("id")))
+            if p == "/api/ai/install": return self.send(200, {"job": start_install(d.get("id"))})   # the page asked the user first; only the fixed commands of ai_setup.json run
+            if p == "/api/ai/switch":  # auto-switch on/off: when the chosen AI fails or runs out, the pick step tries the next free tool
+                E = env(); E["AI_AUTOSWITCH"] = "1" if d.get("on") else "0"; save_env(E); return self.send(200, dict(autoswitch=autoswitch()))
             if p == "/api/ai/test":
                 i = d.get("id")
                 if i not in PROV or i == "none": return self.send(400, {"error": "pick a real AI (No AI has nothing to test)"})

@@ -38,15 +38,26 @@ def _word(w):
     r = "".join(s[0] + (s[1].replace("A", "a" if k == len(syl) - 1 else "aa")) + s[2] for k, s in enumerate(syl))  # the long a: "baat" inside a word, "kya" at its end
     return r.replace("jny", "gy").replace("jn", "gy")  # ज्ञ
 
+# Whole words people write one fixed way in Hinglish, where the letter rules above would give a stiff spelling ("men", "ham", "pulis"). Anything not listed goes through the rules.
+WORDS = dict([
+    ("में", "mein"), ("मे", "mein"), ("मैं", "main"), ("मैंने", "maine"), ("हमें", "hamein"), ("हम", "hum"), ("हमारे", "hamare"), ("हमारा", "hamara"), ("हमारी", "hamari"),
+    ("यह", "yeh"), ("ये", "ye"), ("वो", "woh"), ("वह", "woh"), ("तो", "toh"), ("नहीं", "nahi"), ("नही", "nahi"), ("क्यों", "kyun"), ("कहाँ", "kahan"), ("कहां", "kahan"),
+    ("पुलिस", "police"), ("पुलिसने", "police ne"), ("गेम", "game"), ("गेमिंग", "gaming"), ("सुपर", "super"), ("कार", "car"), ("कारें", "cars"), ("कार्स", "cars"), ("कार्ष", "cars"),
+    ("वीडियो", "video"), ("लाइव", "live"), ("स्ट्रीम", "stream"), ("चैट", "chat"), ("प्लेयर", "player"), ("मिशन", "mission"), ("लेवल", "level"), ("सिक्स", "six"),
+    ("गाड़ी", "gaadi"), ("गाड़ियाँ", "gaadiyan"), ("गाड़ियां", "gaadiyan"), ("गाडी", "gaadi"), ("भाई", "bhai"), ("यार", "yaar"), ("ठीक", "theek"), ("अच्छा", "accha"), ("पैसे", "paise"), ("पैसा", "paisa"),
+    ("राइट", "right"), ("गाइज", "guys"), ("गाइस", "guys"), ("आइलेंड", "island"), ("साइकल", "cycle"), ("एंड", "and"), ("ऑल", "all"), ("ओके", "okay"), ("सूपर", "super"), ("बाइक", "bike"), ("हेलीकॉप्टर", "helicopter"),
+])
+
 def roman(text):
     """Devanagari -> English letters. Text with no Devanagari comes back unchanged."""
     if not DEV.search(text or ""): return text
-    return DEV.sub(lambda m: _word(m.group()), text.replace("।", ".").replace("॥", "."))
+    return DEV.sub(lambda m: WORDS.get(m.group()) or _word(m.group()), text.replace("।", ".").replace("॥", "."))
 
 if __name__ == "__main__":
+    import sys; sys.stdout.reconfigure(encoding="utf-8")  # a Windows console cannot print Devanagari otherwise
     bad = 0
     for a, b in [("क्या बात है", "kya baat hai"), ("काम", "kaam"), ("समझ", "samajh"), ("करता", "karta"), ("कमल", "kamal"), ("बदलना", "badalna"), ("आप", "aap"), ("मुझे", "mujhe"),
                  ("कुछ", "kuchh"), ("ज्ञान", "gyaan"), ("हैं", "hain"), ("लेटस गो", "letas go"), ("Hello bro", "Hello bro"), ("नमस्ते", "namaste"), ("फिर", "fir"), ("जल्दी", "jaldi"),
-                 ("वो चाथ करते है एक गेम को.", "vo chaath karte hai ek gem ko."), ("१२ बजे।", "12 baje.")]:
+                 ("वो चाथ करते है एक गेम को.", "woh chaath karte hai ek game ko."), ("१२ बजे।", "12 baje."), ("मैंने यह कहा", "maine yeh kaha"), ("हम गेम में पुलिस से बचे", "hum game mein police se bache"), ("तो आज हमें सुपर कार्स चुरानी हैं", "toh aaj hamein super cars churaani hain"), ("नहीं यार", "nahi yaar")]:
         got = roman(a); bad += got != b; print("ok  " if got == b else "DIFF", a, "->", got, "(want", b + ")")
     assert not bad, f"{bad} romanizer checks failed"

@@ -8,3 +8,6 @@ brand.json
 app_state.json
 *.log
 *.bak
+
+# your own videos and test output never go to GitHub
+clips/

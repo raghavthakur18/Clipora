@@ -1,0 +1,265 @@
+{
+ "_about": "Setup steps shown in Settings > AI tool for a tool that is not found. One entry per tool id in app.py PROV. 'verified' lists the systems whose commands were run and checked by the author; any other system shows a 'check the tool's own site' note. Steps are for the user to run themselves: Clipora never installs or signs in for you.",
+ "antigravity": {
+  "site": "https://antigravity.google/download",
+  "verified": [
+   "windows"
+  ],
+  "windows": [
+   {
+    "text": "Open PowerShell and run this one line (it installs Google's Antigravity CLI):",
+    "cmd": "winget install -e --id Google.AntigravityCLI"
+   },
+   {
+    "text": "Close PowerShell and Clipora's window, then open Clipora again (the new tool is only seen after a restart)."
+   }
+  ],
+  "mac": [
+   {
+    "text": "Open Terminal and run:",
+    "cmd": "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+   },
+   {
+    "text": "Close Terminal and Clipora, then open Clipora again."
+   }
+  ],
+  "linux": [
+   {
+    "text": "Open a terminal and run:",
+    "cmd": "curl -fsSL https://antigravity.google/cli/install.sh | bash"
+   },
+   {
+    "text": "Close the terminal and Clipora, then open Clipora again."
+   }
+  ],
+  "login": [
+   {
+    "text": "Sign in once: open a terminal, type agy and press Enter. A browser opens: choose Google OAuth and sign in with your Google account. Then close the terminal."
+   },
+   {
+    "text": "Back in Clipora press Check again, then Test this AI tool."
+   }
+  ],
+  "install": {
+   "windows": [
+    {
+     "label": "Install Antigravity CLI",
+     "cmd": [
+      "winget",
+      "install",
+      "-e",
+      "--id",
+      "Google.AntigravityCLI",
+      "--accept-package-agreements",
+      "--accept-source-agreements"
+     ]
+    }
+   ]
+  }
+ },
+ "opencode": {
+  "site": "https://opencode.ai",
+  "verified": [
+   "windows"
+  ],
+  "windows": [
+   {
+    "text": "Install Node.js (nodejs.org, the LTS version) or run: winget install -e --id OpenJS.NodeJS.LTS . Then close and reopen PowerShell and run:",
+    "cmd": "npm install -g --allow-scripts=@opencode/cli @opencode/cli"
+   }
+  ],
+  "mac": [
+   {
+    "text": "Install Node.js (nodejs.org), reopen Terminal, then run:",
+    "cmd": "npm install -g --allow-scripts=@opencode/cli @opencode/cli"
+   }
+  ],
+  "linux": [
+   {
+    "text": "Install Node.js, reopen the terminal, then run:",
+    "cmd": "npm install -g --allow-scripts=@opencode/cli @opencode/cli"
+   }
+  ],
+  "login": [
+   {
+    "text": "Its free models need no account and no sign-in. Close Clipora and open it again, then press Check again and Test this AI tool."
+   }
+  ],
+  "install": {
+   "windows": [
+    {
+     "label": "Install Node.js (needed by OpenCode)",
+     "cmd": [
+      "winget",
+      "install",
+      "-e",
+      "--id",
+      "OpenJS.NodeJS.LTS",
+      "--accept-package-agreements",
+      "--accept-source-agreements"
+     ],
+     "skip_if_found": "npm"
+    },
+    {
+     "label": "Install OpenCode",
+     "cmd": [
+      "npm",
+      "install",
+      "-g",
+      "--allow-scripts=@opencode/cli",
+      "@opencode/cli"
+     ]
+    }
+   ]
+  }
+ },
+ "gemini": {
+  "site": "https://github.com/google-gemini/gemini-cli",
+  "verified": [],
+  "windows": [
+   {
+    "text": "Install Node.js (nodejs.org, the LTS version), reopen PowerShell, then run:",
+    "cmd": "npm install -g @google/gemini-cli"
+   }
+  ],
+  "mac": [
+   {
+    "text": "Install Node.js, reopen Terminal, then run:",
+    "cmd": "npm install -g @google/gemini-cli"
+   }
+  ],
+  "linux": [
+   {
+    "text": "Install Node.js, reopen the terminal, then run:",
+    "cmd": "npm install -g @google/gemini-cli"
+   }
+  ],
+  "login": [
+   {
+    "text": "Google says free personal accounts moved to Antigravity CLI on 18 June 2026. Gemini CLI now needs a work/company Google Cloud plan or a paid API key. Type gemini once to sign in."
+   }
+  ]
+ },
+ "claude": {
+  "site": "https://claude.com/product/claude-code",
+  "verified": [
+   "windows"
+  ],
+  "windows": [
+   {
+    "text": "Open PowerShell and run:",
+    "cmd": "winget install -e --id Anthropic.ClaudeCode"
+   }
+  ],
+  "mac": [
+   {
+    "text": "Follow the install steps on the Claude Code site (link below)."
+   }
+  ],
+  "linux": [
+   {
+    "text": "Follow the install steps on the Claude Code site (link below)."
+   }
+  ],
+  "login": [
+   {
+    "text": "Type claude once in a terminal, then /login, and pick your Claude Pro or Max account."
+   }
+  ],
+  "install": {
+   "windows": [
+    {
+     "label": "Install Claude Code",
+     "cmd": [
+      "winget",
+      "install",
+      "-e",
+      "--id",
+      "Anthropic.ClaudeCode",
+      "--accept-package-agreements",
+      "--accept-source-agreements"
+     ]
+    }
+   ]
+  }
+ },
+ "codex": {
+  "site": "https://github.com/openai/codex",
+  "verified": [],
+  "windows": [
+   {
+    "text": "Install Node.js, reopen PowerShell, then run:",
+    "cmd": "npm install -g @openai/codex"
+   }
+  ],
+  "mac": [
+   {
+    "text": "Install Node.js, reopen Terminal, then run:",
+    "cmd": "npm install -g @openai/codex"
+   }
+  ],
+  "linux": [
+   {
+    "text": "Install Node.js, reopen the terminal, then run:",
+    "cmd": "npm install -g @openai/codex"
+   }
+  ],
+  "login": [
+   {
+    "text": "Type codex once in a terminal and sign in with your ChatGPT account."
+   }
+  ]
+ },
+ "kimi": {
+  "site": "https://www.kimi.com",
+  "verified": [],
+  "windows": [
+   {
+    "text": "Follow the install steps on the Kimi site (link below)."
+   }
+  ],
+  "mac": [
+   {
+    "text": "Follow the install steps on the Kimi site (link below)."
+   }
+  ],
+  "linux": [
+   {
+    "text": "Follow the install steps on the Kimi site (link below)."
+   }
+  ],
+  "login": [
+   {
+    "text": "It needs a Kimi plan. Sign in as the tool asks."
+   }
+  ]
+ },
+ "ollama": {
+  "site": "https://ollama.com/download",
+  "verified": [],
+  "windows": [
+   {
+    "text": "Download and install Ollama from the link below, then run:",
+    "cmd": "ollama pull llama3.1"
+   }
+  ],
+  "mac": [
+   {
+    "text": "Download and install Ollama from the link below, then run:",
+    "cmd": "ollama pull llama3.1"
+   }
+  ],
+  "linux": [
+   {
+    "text": "Download and install Ollama from the link below, then run:",
+    "cmd": "ollama pull llama3.1"
+   }
+  ],
+  "login": [
+   {
+    "text": "No account. It runs on your PC and needs a strong graphics card."
+   }
+  ]
+ },
+ "_install": "One-click Install button in Settings > AI tool. Only commands that were run and checked by the author on that system are listed; everything else shows steps only. Commands are fixed lists, never built from user input. 'skip_if_found' skips a step when that program already exists."
+}
